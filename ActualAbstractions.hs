@@ -1,4 +1,7 @@
-{-# LANGUAGE TypeApplications, TemplateHaskell, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeApplications
+           , TemplateHaskell
+           , MultiParamTypeClasses
+#-}
 import Test.QuickCheck
 import Data.List (sort, nub)
 
@@ -48,6 +51,17 @@ instance Tree KeySet where
   delete k (KS ks) = KS $ [ k' | k' <- ks , k' /= k ]
 
   merge (KS ks) (KS ks') = KS $ nub (ks ++ ks')
+
+data ValueSet k v = VS { values :: [v] } 
+
+instance Tree ValueSet where
+  empty = VS []
+
+  insert k v (VS vs) = VS (v:vs)
+
+  delete k vs = vs
+
+  merge (VS vs) (VS vs') = VS (vs ++ vs')
 
 data BST k v = Empty
              | Node k v (BST k v) (BST k v)
@@ -131,14 +145,41 @@ instance Abstract KeySet BST where
 instance Specification KeySet where
   ks <~ ks' = sort (set ks) == sort (set ks')
 
-prop_insert_abstract :: Int -> Int -> BST Int Int -> Bool
-prop_insert_abstract k v t = abstract @KeySet (insert k v t) <~ insert k v (abstract t)
+instance Abstract ValueSet BST where
+  abstract = VS . nub . go
+    where
+      go Empty = []
+      go (Node k v l r) = v : go l ++ go r
 
-prop_delete_abstract :: Int -> BST Int Int -> Bool
-prop_delete_abstract k t = abstract @KeySet (delete k t) <~ delete k (abstract t)
+instance Specification ValueSet where
+  vs <~ vs' = all (`elem` values vs') (values vs)
 
-prop_merge_abstract :: BST Int Int -> BST Int Int -> Bool
-prop_merge_abstract t0 t1 = abstract @KeySet (merge t0 t1) <~ merge (abstract t0) (abstract t1)
+prop_insert_abstract_interval :: Int -> Int -> BST Int Int -> Bool
+prop_insert_abstract_interval k v t = abstract @Interval (insert k v t) <~ insert k v (abstract t)
+
+prop_delete_abstract_interval :: Int -> BST Int Int -> Bool
+prop_delete_abstract_interval k t = abstract @Interval (delete k t) <~ delete k (abstract t)
+
+prop_merge_abstract_interval :: BST Int Int -> BST Int Int -> Bool
+prop_merge_abstract_interval t0 t1 = abstract @Interval (merge t0 t1) <~ merge (abstract t0) (abstract t1)
+
+prop_insert_abstract_keyset :: Int -> Int -> BST Int Int -> Bool
+prop_insert_abstract_keyset k v t = abstract @KeySet (insert k v t) <~ insert k v (abstract t)
+
+prop_delete_abstract_keyset :: Int -> BST Int Int -> Bool
+prop_delete_abstract_keyset k t = abstract @KeySet (delete k t) <~ delete k (abstract t)
+
+prop_merge_abstract_keyset :: BST Int Int -> BST Int Int -> Bool
+prop_merge_abstract_keyset t0 t1 = abstract @ValueSet (merge t0 t1) <~ merge (abstract t0) (abstract t1)
+
+prop_insert_abstract_valueset :: Int -> Int -> BST Int Int -> Bool
+prop_insert_abstract_valueset k v t = abstract @ValueSet (insert k v t) <~ insert k v (abstract t)
+
+prop_delete_abstract_valueset :: Int -> BST Int Int -> Bool
+prop_delete_abstract_valueset k t = abstract @ValueSet (delete k t) <~ delete k (abstract t)
+
+prop_merge_abstract_valueset :: BST Int Int -> BST Int Int -> Bool
+prop_merge_abstract_valueset t0 t1 = abstract @ValueSet (merge t0 t1) <~ merge (abstract t0) (abstract t1)
 
 return []
-test = $(quickCheckAll)
+test = $forAllProperties (quickCheckWithResult (stdArgs { maxSuccess = 10000 }))
