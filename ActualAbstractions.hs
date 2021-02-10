@@ -78,23 +78,23 @@ instance (Ord k, Arbitrary k, Arbitrary v) => Arbitrary (BST k v) where
 instance Tree BST where
   empty = Empty
 
-  {- Bug 1 [YES]:
+  {- Bug 1: Abstraction [YES] | Invariant [NO]
    -    insert k v _ = Node k v Empty Empty
    - This bug is caught by the delete, insert, and merge
    - abstraction properties.
    -}
   insert k v Empty = Node k v Empty Empty
   insert k v (Node k' v' tl tr) | k < k'    = Node k' v' (insert k v tl) tr
-                                {- Bug 2 [NO]:
+                                {- Bug 2: Abstraction [NO] | Invariant [YES]
                                  -    comment out the line below
                                  - The abstraction properties do not find this bug.
                                  -}
-                                {- Bug 3 [NO]:
+                                {- Bug 3: Abstraction [NO] | Invariant [NO]
                                  -    | k == k'   = Node k' v' tl tr
                                  - The abstraction properties do not find this bug.
                                  -}
                                 | k == k'   = Node k' v tl tr
-                                {- Bug 5 [YES]:
+                                {- Bug 5: Abstraction [YES] | Invariant [YES]
                                  -    | otherwise = Node k' v' tl (insert k' v tr) 
                                  - The merge abstraction property finds this bug.
                                  -}
@@ -102,13 +102,13 @@ instance Tree BST where
 
   delete k Empty = Empty
   delete k (Node k' v tl tr) | k == k' = merge tl tr
-                             {- Bug 4 [YES]:
+                             {- Bug 4: Abstraction [YES] | Invariant [NO]
                               -     | otherwise = delete k tl
                               - The delete abstraction property finds this bug.
                               -}
                              | otherwise = Node k' v (delete k tl) (delete k tr)
 
-  {- Bug 5 [NO]:
+  {- Bug 5: Abstraction [NO] | Invariant [YES]
         merge Empty r = r
         merge l Empty = l
         merge (Node k v l r) (Node k' v' l' r') = Node k v l (Node k' v' (merge r l') r')
@@ -119,9 +119,12 @@ instance Tree BST where
       elements Empty = []
       elements (Node k v tl tr) = elements tl ++ [(k, v)] ++ elements tr
 
+toList :: BST k v -> [(k, v)]
+toList Empty = []
+toList (Node k v tl tr) = toList tl ++ [(k, v)] ++ toList tr
+
 size :: BST k v -> Int
-size Empty = 0
-size (Node k v tl tr) = 1 + size tl + size tr
+size = length . toList 
 
 instance Abstract Interval BST where
   abstract t = IA (size t) (size t)
@@ -130,29 +133,29 @@ instance Specification Interval where
   ia <~ ia' = lower ia' <= lower ia && upper ia <= upper ia'
 
 instance Abstract ListMap BST where
-  abstract Empty = LM []
-  abstract (Node k v l r) = LM $ (k, v) : list (abstract l) ++ list (abstract r)
+  abstract = LM . toList 
 
 instance Specification ListMap where
   lm <~ lm' = sort (list lm) == sort (list lm')
 
 instance Abstract KeySet BST where
-  abstract = KS . nub . go
-    where
-      go Empty = []
-      go (Node k v l r) = k : go l ++ go r
+  abstract = KS . nub . map fst . toList 
 
 instance Specification KeySet where
   ks <~ ks' = sort (set ks) == sort (set ks')
 
 instance Abstract ValueSet BST where
-  abstract = VS . nub . go
-    where
-      go Empty = []
-      go (Node k v l r) = v : go l ++ go r
+  abstract = VS . nub . map snd . toList
 
 instance Specification ValueSet where
   vs <~ vs' = all (`elem` values vs') (values vs)
+
+isValid :: BST Int Int -> Bool
+isValid Empty = True
+isValid (Node k _ l r) =  all (<k) (map fst $ toList l)
+                       && all (>k) (map fst $ toList r)
+                       && isValid l
+                       && isValid r
 
 prop_insert_abstract_interval :: Int -> Int -> BST Int Int -> Bool
 prop_insert_abstract_interval k v t = abstract @Interval (insert k v t) <~ insert k v (abstract t)
@@ -180,6 +183,15 @@ prop_delete_abstract_valueset k t = abstract @ValueSet (delete k t) <~ delete k 
 
 prop_merge_abstract_valueset :: BST Int Int -> BST Int Int -> Bool
 prop_merge_abstract_valueset t0 t1 = abstract @ValueSet (merge t0 t1) <~ merge (abstract t0) (abstract t1)
+
+prop_insert_isValid :: Int -> Int -> BST Int Int -> Bool
+prop_insert_isValid k v t = isValid (insert k v t)
+
+prop_delete_isValid :: Int -> BST Int Int -> Bool
+prop_delete_isValid k t = isValid (delete k t)
+
+prop_merge_isValid :: BST Int Int -> BST Int Int -> Bool
+prop_merge_isValid t0 t1 = isValid (merge t0 t1)
 
 return []
 test = $forAllProperties (quickCheckWithResult (stdArgs { maxSuccess = 10000 }))
